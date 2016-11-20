@@ -5,59 +5,42 @@
 // I2Cdev and MPU9150 must be installed as libraries, or else the .cpp/.h files
 // for both classes must be in the include path of your project
 #include "I2Cdev.h"
-#include "MPU9150.h"
-#include "helper_3dmath.h"
-
 
 #define MPU9250_ADDRESS 0x68
 #define WHO_AM_I_MPU9250 0x75 // Should return 0x71
+#define SMPLRT_DIV       0x19
+#define CONFIG           0x1A
+#define GYRO_CONFIG      0x1B
+#define ACCEL_CONFIG     0x1C
+#define ACCEL_CONFIG2    0x1D
+#define INT_PIN_CFG      0x37
+#define INT_ENABLE       0x38
+#define INT_STATUS       0x3A
+#define ACCEL_XOUT_H     0x3B
+#define GYRO_XOUT_H      0x43
+#define PWR_MGMT_1       0x6B // Device defaults to the SLEEP mode
+
+#define AK8963_ADDRESS   0x0C
+#define AK8963_WHO_AM_I  0x00 // should return 0x48
+#define AK8963_ST1       0x02  // data ready status bit 0
+#define AK8963_XOUT_L   0x03  // data
+#define AK8963_CNTL      0x0A  // Power down (0000), single-measurement (0001), self-test (1000) and Fuse ROM (1111) modes on bits 3:0
+#define AK8963_ASAX      0x10  // Fuse ROM x-axis sensitivity adjustment value
+
 
 uint8_t Gscale = 0;
 uint8_t Ascale = 0;
 uint8_t Mscale = 1; // 16-bit magnetometer resolution
 uint8_t Mmode = 0x06;
 
-float mRes = 10.*4800.0/32767.0; // Proper scale to return milliGauss
-
-MPU9150 accelGyroMag;
-
-int16_t ax, ay, az;
-int16_t gx, gy, gz;
-int16_t mx, my, mz;
-int16_t magCount[3], accelCount[3];
-
-float ax_base, ay_base, az_base;
-float gx_base, gy_base, gz_base;
-float gx_angle, gy_angle, gz_angle;
+int16_t accelCount[3], gyroCount[3], magCount[3];
 
 float magCalibration[3] = {0, 0, 0}, magBias[3] = {0, 0, 0}, magScale[3]  = {0, 0, 0};
-bool newMagData = false;
-float mRes = 10.*4912./32760.0;
-float aRes = 2.0/32768.0;
-float heading = 0.0;
+float mRes = 10.*4800.0/32767.0; // Proper scale to return milliGauss
+float aRes = 2.0/32767.0;
+float gRes = 250.0/32767.0;
 
-float q[4] = {1.0f, 0.0f, 0.0f, 0.0f};
-float eInt[3] = {0.0f, 0.0f, 0.0f};
-float a12, a22, a31, a32, a33;
-float pitch, yaw, roll;
-float aRoll, aPitch;
-float RADIANS_TO_DEGREES = 180/3.14159;
-float dt, last_time;
-float alpha = 0.96;
-float last_x_angle, last_y_angle, last_z_angle;
-float magx, magy;
-
-float GyroMeasError = PI * (4.0f / 180.0f);   // gyroscope measurement error in rads/s (start at 40 deg/s)
-float GyroMeasDrift = PI * (0.0f  / 180.0f);   // gyroscope measurement drift in rad/s/s (start at 0.0 deg/s/s)
-
-float beta = sqrt(3.0f / 4.0f) * GyroMeasError;   // compute beta
-float zeta = sqrt(3.0f / 4.0f) * GyroMeasDrift;   // compute zeta, the other free parameter in the Madgwick scheme usually set to a small or zero value
-
-uint32_t Now = 0, lastUpdate = 0;
-float deltat = 0.0f;
-
-#define Kp 2.0f * 5.0f // these are the free parameters in the Mahony filter and fusion scheme, Kp for proportional feedback, Ki for integral
-#define Ki 0.0f
+float ax, ay, az, gx, gy, gz, mx, my, mz;
 
 void setup() {
     // join I2C bus (I2Cdev library doesn't do this automatically)
@@ -83,8 +66,7 @@ void setup() {
         initAK8963(magCalibration);
         Serial.println("AK8963 initialized for active data mode...."); // Initialize device for active mode read of magnetometer
 
-        magcalMPU9250(magBias, magScale);
-
+        //magcalMPU9250(magBias, magScale);
         Serial.println("AK8963 mag biases (mG)"); Serial.println(magBias[0]); Serial.println(magBias[1]); Serial.println(magBias[2]); 
         Serial.println("AK8963 mag scale (mG)"); Serial.println(magScale[0]); Serial.println(magScale[1]); Serial.println(magScale[2]); 
         delay(2000); // add delay to see results before serial spew of data
@@ -92,10 +74,44 @@ void setup() {
 }
 
 void loop() {
-    
-
-    //Delay not necessary, as in readMagData it is checked if the data is available
-    delay(50);
+    // If intPin goes high, all data registers have new data
+    if (readByte(MPU9250_ADDRESS, INT_STATUS) & 0x01) {  // On interrupt, check if data ready interrupt
+        /*readAccelData(accelCount);  // Read the x/y/z adc values
+        
+        // Now we'll calculate the accleration value into actual g's
+        ax = (float)accelCount[0]*aRes; // - accelBias[0];  // get actual g value, this depends on scale being set
+        ay = (float)accelCount[1]*aRes; // - accelBias[1];   
+        az = (float)accelCount[2]*aRes; // - accelBias[2];
+        Serial.print("ax = "); Serial.print(ax); 
+        Serial.print(" ay = "); Serial.print(ay); 
+        Serial.print(" az = "); Serial.print(az); Serial.println(" g");
+       
+        readGyroData(gyroCount);  // Read the x/y/z adc values
+     
+        // Calculate the gyro value into actual degrees per second
+        gx = (float)gyroCount[0]*gRes;  // get actual gyro value, this depends on scale being set
+        gy = (float)gyroCount[1]*gRes;  
+        gz = (float)gyroCount[2]*gRes;
+        Serial.print("gx = "); Serial.print(gx); 
+        Serial.print(" gy = "); Serial.print(gy); 
+        Serial.print(" gz = "); Serial.print(gz); Serial.println(" deg/s");
+        */
+        readMagData(magCount);  // Read the x/y/z adc values
+        
+//        magbias[0] = +470.;  // User environmental x-axis correction in milliGauss, should be automatically calculated
+//        magbias[1] = +120.;  // User environmental x-axis correction in milliGauss
+//        magbias[2] = +125.;  // User environmental x-axis correction in milliGauss
+        
+        // Calculate the magnetometer values in milliGauss
+        // Include factory calibration per data sheet and user environmental corrections
+        mx = (float)magCount[0]*mRes;//*magCalibration[0] - magbias[0];  // get actual magnetometer value, this depends on scale being set
+        my = (float)magCount[1]*mRes;//*magCalibration[1] - magbias[1];  
+        mz = (float)magCount[2]*mRes;//*magCalibration[2] - magbias[2];   
+        Serial.print("mx = "); Serial.print(mx); 
+        Serial.print(" my = "); Serial.print(my); 
+        Serial.print(" mz = "); Serial.print(mz); Serial.println(" mG");
+        
+    }
 }
 
 
@@ -152,7 +168,7 @@ void initMPU9250() {
     // clear on read of INT_STATUS, and enable I2C_BYPASS_EN so additional chips 
     // can join the I2C bus and all can be controlled by the Arduino as master
     //   writeByte(MPU9250_ADDRESS, INT_PIN_CFG, 0x22);    
-    writeByte(MPU9250_ADDRESS, INT_PIN_CFG, 0x12);  // INT is 50 microsecond pulse and any read to clear  
+    writeByte(MPU9250_ADDRESS, INT_PIN_CFG, 0x22);
     writeByte(MPU9250_ADDRESS, INT_ENABLE, 0x01);  // Enable data ready (bit 0) interrupt
     delay(100);
 }
@@ -221,6 +237,35 @@ void magcalMPU9250(float * dest1, float * dest2)
     dest2[2] = avg_rad/((float)mag_scale[2]);
   
     Serial.println("Mag Calibration done!");
+}
+
+void readAccelData(int16_t * destination) {
+    uint8_t rawData[6];  // x/y/z accel register data stored here
+    readBytes(MPU9250_ADDRESS, ACCEL_XOUT_H, 6, &rawData[0]);  // Read the six raw data registers into data array
+    destination[0] = ((int16_t)rawData[0] << 8) | rawData[1] ;  // Turn the MSB and LSB into a signed 16-bit value
+    destination[1] = ((int16_t)rawData[2] << 8) | rawData[3] ;  
+    destination[2] = ((int16_t)rawData[4] << 8) | rawData[5] ; 
+}
+
+void readGyroData(int16_t * destination) {
+    uint8_t rawData[6];  // x/y/z gyro register data stored here
+    readBytes(MPU9250_ADDRESS, GYRO_XOUT_H, 6, &rawData[0]);  // Read the six raw data registers sequentially into data array
+    destination[0] = ((int16_t)rawData[0] << 8) | rawData[1] ;  // Turn the MSB and LSB into a signed 16-bit value
+    destination[1] = ((int16_t)rawData[2] << 8) | rawData[3] ;  
+    destination[2] = ((int16_t)rawData[4] << 8) | rawData[5] ; 
+}
+
+void readMagData(int16_t * destination) {
+    uint8_t rawData[7];  // x/y/z gyro register data, ST2 register stored here, must read ST2 at end of data acquisition
+    if(readByte(AK8963_ADDRESS, AK8963_ST1) & 0x01) { // wait for magnetometer data ready bit to be set
+        readBytes(AK8963_ADDRESS, AK8963_XOUT_L, 7, &rawData[0]);  // Read the six raw data and ST2 registers sequentially into data array
+        uint8_t c = rawData[6]; // End data read by reading ST2 register
+        if(!(c & 0x08)) { // Check if magnetic sensor overflow set, if not then report data
+          destination[0] = ((int16_t)rawData[1] << 8) | rawData[0] ;  // Turn the MSB and LSB into a signed 16-bit value
+          destination[1] = ((int16_t)rawData[3] << 8) | rawData[2] ;  // Data stored as little Endian
+          destination[2] = ((int16_t)rawData[5] << 8) | rawData[4] ; 
+        }
+    }
 }
 
 

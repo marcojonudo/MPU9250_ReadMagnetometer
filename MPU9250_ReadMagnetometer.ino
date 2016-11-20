@@ -98,18 +98,54 @@ void loop() {
         */
         readMagData(magCount);  // Read the x/y/z adc values
         
-//        magbias[0] = +470.;  // User environmental x-axis correction in milliGauss, should be automatically calculated
-//        magbias[1] = +120.;  // User environmental x-axis correction in milliGauss
-//        magbias[2] = +125.;  // User environmental x-axis correction in milliGauss
+//        magBias[0] = -335.09;
+//        magBias[1] = 681.61;
+//        magBias[2] = -513.17;
         
+//        magBias[0] = -340.33;
+//        magBias[1] = 655.26;
+//        magBias[2] = -509.79;
+
+//        magBias[0] = -376.98;
+//        magBias[1] = 648.23;
+//        magBias[2] = -524.99;
+//        magScale[0] = 1.10;
+//        magScale[1] = 0.93;
+//        magScale[2] = 0.99;
+
+//        magBias[0] = -366.51;
+//        magBias[1] = 628.91;
+//        magBias[2] = -535.11;
+//        magScale[0] = 1.01;
+//        magScale[1] = 0.96;
+//        magScale[2] = 1.04;
+
+//        magBias[0] = -396.18;
+//        magBias[1] = 641.20;
+//        magBias[2] = -499.66;
+//        magScale[0] = 1.14;
+//        magScale[1] = 0.93;
+//        magScale[2] = 0.96;
+
+        magBias[0] = -363.018;  // User environmental x-axis correction in milliGauss, should be automatically calculated
+        magBias[1] = 651.042;  // User environmental x-axis correction in milliGauss
+        magBias[2] = -516.544;  // User environmental x-axis correction in milliGauss
+        magScale[0] = 1.0625;
+        magScale[1] = 0.945;
+        magScale[2] = 0.9825;
+
         // Calculate the magnetometer values in milliGauss
         // Include factory calibration per data sheet and user environmental corrections
-        mx = (float)magCount[0]*mRes;//*magCalibration[0] - magbias[0];  // get actual magnetometer value, this depends on scale being set
-        my = (float)magCount[1]*mRes;//*magCalibration[1] - magbias[1];  
-        mz = (float)magCount[2]*mRes;//*magCalibration[2] - magbias[2];   
-        Serial.print("mx = "); Serial.print(mx); 
-        Serial.print(" my = "); Serial.print(my); 
-        Serial.print(" mz = "); Serial.print(mz); Serial.println(" mG");
+        mx = (float)magCount[0]*mRes*magCalibration[0] - magBias[0];  // get actual magnetometer value, this depends on scale being set
+        my = (float)magCount[1]*mRes*magCalibration[1] - magBias[1];  
+        mz = (float)magCount[2]*mRes*magCalibration[2] - magBias[2];
+        mx *= magScale[0];
+        my *= magScale[1];
+        mz *= magScale[2]; 
+
+        Serial.print(mx); Serial.print(","); 
+        Serial.print(my); Serial.print(","); 
+        Serial.println(mz);
         
     }
 }
